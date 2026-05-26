@@ -373,7 +373,7 @@ def crystallize_verifier_card(policy: dict, topic: dict, positive: list[dict],
     d.setdefault("trigger", {"text": "single-turn reasoning final answer",
                               "command_kinds": ["final"], "error_kinds": []})
 
-    # Carry training-set stats (used by V-calibrated gate at eval time).
+    # Carry training-set stats for downstream expected-gain gating.
     d["expected_gain"] = policy.get("expected_gain", {})
     d["source_policy"] = policy.get("policy_id")
     d["source_traces"] = policy.get("source_traces", [])[:8]
@@ -396,7 +396,7 @@ def crystallize_verifier_card(policy: dict, topic: dict, positive: list[dict],
         d["abstract"] = (f"[{d['archetype']}] check={d.get('check','')} "
                           f"trap={d.get('trap','')}")[:400]
     d["embedding_text"] = d["abstract"]
-    # Mode marker so eval can use the verifier renderer.
+    # Mode marker for downstream verifier-card rendering.
     d["card_kind"] = "verifier"
     return d
 
@@ -518,7 +518,7 @@ def crystallize_one(policy: dict, topic: dict, evidence: list[dict],
             for k in d["trigger"].get("error_kinds", []) or []:
                 kws.add(str(k).lower())
         d["lexical_keywords"] = sorted(kws)[:20]
-    # Used by dense retrieval (kept for backward compat with v2 eval)
+    # Used by dense retrieval.
     d["embedding_text"] = d["abstract"]
     return d
 
@@ -526,7 +526,7 @@ def crystallize_one(policy: dict, topic: dict, evidence: list[dict],
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--policies", required=True)
-    ap.add_argument("--topics", required=True, help="l3_topics_v3.jsonl")
+    ap.add_argument("--topics", required=True, help="l3_topics.jsonl")
     ap.add_argument("--l1-traces", required=True)
     ap.add_argument("--output", required=True)
     ap.add_argument("--parallel", type=int, default=3)
@@ -615,7 +615,7 @@ def main():
                 futs[ex.submit(crystallize_one, p, topic,
                                 positive_pool[:6], args.n_min, neg_pool[:6])] = p["policy_id"]
         i = 0
-        prefix = "msce_v5" if args.mode == "verifier_card" else "msce_v3"
+        prefix = "msce_reason" if args.mode == "verifier_card" else "msce_skill"
         for f in as_completed(futs):
             pid = futs[f]
             try:
@@ -633,7 +633,7 @@ def main():
             if i % 5 == 0:
                 print(f"  crystallized {i}/{len(candidates)}")
 
-    # Patch topics with related_skills (so eval can route topic → skills)
+    # Patch topics with related_skills so retrieval can route topic → skills.
     skills = [json.loads(l) for l in open(args.output)]
     topic_to_skills = defaultdict(list)
     for s in skills:

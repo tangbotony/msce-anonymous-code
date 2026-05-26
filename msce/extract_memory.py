@@ -12,8 +12,8 @@ Input:
     --session-dir   train job dir with <task>__trial_N/session.jsonl + result.json
 Output:
     --output-dir/
-        l1_traces_v3.jsonl      one record per step, with structured fields
-        task_summaries_v3.jsonl one record per task: passed, r_human, n_steps, intent_tags, artifact_tags
+        l1_traces.jsonl      one record per step, with structured fields
+        task_summaries.jsonl one record per task: passed, r_human, n_steps, intent_tags, artifact_tags
 """
 from __future__ import annotations
 import argparse
@@ -393,7 +393,7 @@ alpha:
 只输出 JSON。"""
 
 
-def score_alpha_v3(step: dict) -> float:
+def score_alpha(step: dict) -> float:
     refl = step.get("reflection_v2", {})
     ob = step.get("observation", {})
     if step.get("tool_call", {}).get("command_kind") == "final":
@@ -438,7 +438,7 @@ def backfill_values(steps: list[dict], r_human: float, parallel: int = 4) -> lis
     if T == 0:
         return []
     with ThreadPoolExecutor(max_workers=parallel) as ex:
-        alphas = list(ex.map(score_alpha_v3, steps))
+        alphas = list(ex.map(score_alpha, steps))
     V = [0.0] * T
     V[T - 1] = r_human
     for t in range(T - 2, -1, -1):
@@ -542,8 +542,8 @@ def main():
         task_dirs = task_dirs[: args.max_tasks]
     print(f"Found {len(task_dirs)} train tasks with session.jsonl")
 
-    l1p = od / "l1_traces_v3.jsonl"
-    sp = od / "task_summaries_v3.jsonl"
+    l1p = od / "l1_traces.jsonl"
+    sp = od / "task_summaries.jsonl"
     done = 0
     with l1p.open("w") as fl, sp.open("w") as fs, \
             ThreadPoolExecutor(max_workers=args.parallel_tasks) as pool:

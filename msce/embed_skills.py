@@ -2,11 +2,11 @@
 """MSCE — Step 5: pre-compute skill abstract embeddings + write index.
 
 Input:
-    --skill-bank   skill_bank_v3.jsonl from crystallize
+    --skill-bank   skill_bank.jsonl from crystallize
 Output:
-    --output       skill_index_v3.jsonl  (same records + 'embedding' field)
-    --emb-npy      skill_embeddings_v3.npy  (N,1024 matrix in skill_id order)
-    --emb-ids      skill_ids_v3.json        (list of skill_ids in same order)
+    --output       skill_index.jsonl  (same records + 'embedding' field)
+    --emb-npy      skill_embeddings.npy  (N, embedding_dim matrix in skill_id order)
+    --emb-ids      skill_ids.json        (list of skill_ids in same order)
 """
 from __future__ import annotations
 import argparse, json, os, time, sys

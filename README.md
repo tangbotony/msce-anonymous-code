@@ -1,17 +1,17 @@
 # MSCE: Memory-Skill Co-Evolution
 
-This repository contains the open-source implementation of the algorithm
-described in the paper *From Memory to Skills: Evidence-Grounded Governance for
-Long-Horizon LLM Agents*.
+This repository contains a minimal runnable implementation of the core
+memory-to-skill construction algorithm described in the paper *From Memory to
+Skills: Evidence-Grounded Governance for Long-Horizon LLM Agents*.
 
 It is the paper-aligned implementation, not the earlier prototype. The code
-keeps the final MSCE pipeline:
+keeps the core MSCE pipeline:
 
 - L1 grounded trace memory with reflection-weighted value backfilling
 - L2 cross-episode policy induction with expected gain
 - L3 environmental cognition abstraction
 - evidence-grounded skill crystallization with anti-patterns and boundaries
-- multi-route retrieval with applicability and value-calibrated gates
+- multi-route retrieval utilities with applicability and expected-gain gates
 - optional reasoning verifier-card mode for single-turn reasoning tasks
 
 Private artifacts were intentionally removed. This repository does not include
@@ -48,22 +48,22 @@ python -m msce.extract_memory \
   --parallel-reflection 4
 
 python -m msce.induce_l2 \
-  --l1-traces runs/msce-code/l1_traces_v3.jsonl \
-  --task-summaries runs/msce-code/task_summaries_v3.jsonl \
-  --output runs/msce-code/l2_policies_v3.jsonl \
+  --l1-traces runs/msce-code/l1_traces.jsonl \
+  --task-summaries runs/msce-code/task_summaries.jsonl \
+  --output runs/msce-code/l2_policies.jsonl \
   --sim-thresh 0.62 \
   --min-cluster-size 2 \
   --min-abs-V 0.10
 
 python -m msce.abstract_l3 \
-  --policies runs/msce-code/l2_policies_v3.jsonl \
-  --l1-traces runs/msce-code/l1_traces_v3.jsonl \
-  --output runs/msce-code/l3_topics_v3.jsonl
+  --policies runs/msce-code/l2_policies.jsonl \
+  --l1-traces runs/msce-code/l1_traces.jsonl \
+  --output runs/msce-code/l3_topics.jsonl
 
 python -m msce.crystallize_skill \
-  --policies runs/msce-code/l2_policies_v3.jsonl \
-  --topics runs/msce-code/l3_topics_v3.jsonl \
-  --l1-traces runs/msce-code/l1_traces_v3.jsonl \
+  --policies runs/msce-code/l2_policies.jsonl \
+  --topics runs/msce-code/l3_topics.jsonl \
+  --l1-traces runs/msce-code/l1_traces.jsonl \
   --output runs/msce-code/skill_bank.jsonl \
   --n-min 2
 
@@ -78,9 +78,9 @@ For Mathematical Reasoning, use verifier-card crystallization:
 
 ```bash
 python -m msce.crystallize_skill \
-  --policies runs/msce-reasoning/l2_policies_v3.jsonl \
-  --topics runs/msce-reasoning/l3_topics_v3.jsonl \
-  --l1-traces runs/msce-reasoning/l1_traces_v3.jsonl \
+  --policies runs/msce-reasoning/l2_policies.jsonl \
+  --topics runs/msce-reasoning/l3_topics.jsonl \
+  --l1-traces runs/msce-reasoning/l1_traces.jsonl \
   --output runs/msce-reasoning/skill_bank.jsonl \
   --mode verifier_card
 ```

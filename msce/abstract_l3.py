@@ -12,10 +12,10 @@ Implementation notes:
 3. Each topic node is consumable directly by the retrieval layer.
 
 Input:
-    --policies l2_policies_v3.jsonl
-    --l1-traces l1_traces_v3.jsonl
+    --policies l2_policies.jsonl
+    --l1-traces l1_traces.jsonl
 Output:
-    --output l3_topics_v3.jsonl
+    --output l3_topics.jsonl
 """
 from __future__ import annotations
 import argparse

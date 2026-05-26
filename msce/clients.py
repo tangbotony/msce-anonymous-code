@@ -126,7 +126,12 @@ def embedding_batch(
         payload = {"model": DEFAULT_EMBEDDING_MODEL, "input": chunk}
         for attempt in range(retries):
             try:
-                response = requests.post(url, json=payload, timeout=timeout)
+                response = requests.post(
+                    url,
+                    json=payload,
+                    headers=_auth_headers(),
+                    timeout=timeout,
+                )
                 if response.status_code == 200:
                     data = response.json()["data"]
                     out.append(

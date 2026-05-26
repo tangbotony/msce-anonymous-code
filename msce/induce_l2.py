@@ -13,10 +13,10 @@ Implementation notes:
 4. Output L2 includes intent_tags / artifact_tags (carried from L1).
 
 Input:
-    --l1-traces  output/l1_traces_v3.jsonl from extract_memory_v3
-    --task-summaries output/task_summaries_v3.jsonl (for V_avg_without baseline)
+    --l1-traces  output/l1_traces.jsonl from extract_memory
+    --task-summaries output/task_summaries.jsonl (for V_avg_without baseline)
 Output:
-    --output  l2_policies_v3.jsonl
+    --output  l2_policies.jsonl
 """
 from __future__ import annotations
 import argparse
@@ -483,7 +483,7 @@ def main():
             n_done += 1
             if pol is None:
                 continue
-            pol["policy_id"] = f"L2v3_{ci:03d}"
+            pol["policy_id"] = f"L2_{ci:03d}"
             pol["expected_gain"] = compute_expected_gain(pol, all_traces, task_summ)
             fo.write(json.dumps(pol, ensure_ascii=False) + "\n")
             fo.flush()

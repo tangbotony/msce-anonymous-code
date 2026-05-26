@@ -19,9 +19,9 @@ python -m msce.extract_memory \
   --parallel-reflection "${MSCE_PARALLEL_REFLECTION:-4}"
 
 python -m msce.induce_l2 \
-  --l1-traces "$OUT_DIR/l1_traces_v3.jsonl" \
-  --task-summaries "$OUT_DIR/task_summaries_v3.jsonl" \
-  --output "$OUT_DIR/l2_policies_v3.jsonl" \
+  --l1-traces "$OUT_DIR/l1_traces.jsonl" \
+  --task-summaries "$OUT_DIR/task_summaries.jsonl" \
+  --output "$OUT_DIR/l2_policies.jsonl" \
   --sim-thresh "${MSCE_SIM_THRESH:-0.62}" \
   --min-cluster-size "${MSCE_MIN_CLUSTER_SIZE:-2}" \
   --max-clusters "${MSCE_MAX_CLUSTERS:-60}" \
@@ -29,16 +29,16 @@ python -m msce.induce_l2 \
   --min-abs-V "${MSCE_MIN_ABS_V:-0.10}"
 
 python -m msce.abstract_l3 \
-  --policies "$OUT_DIR/l2_policies_v3.jsonl" \
-  --l1-traces "$OUT_DIR/l1_traces_v3.jsonl" \
-  --output "$OUT_DIR/l3_topics_v3.jsonl" \
+  --policies "$OUT_DIR/l2_policies.jsonl" \
+  --l1-traces "$OUT_DIR/l1_traces.jsonl" \
+  --output "$OUT_DIR/l3_topics.jsonl" \
   --parallel "${MSCE_PARALLEL_L3:-3}" \
   --min-policies-per-topic "${MSCE_MIN_POLICIES_PER_TOPIC:-2}"
 
 python -m msce.crystallize_skill \
-  --policies "$OUT_DIR/l2_policies_v3.jsonl" \
-  --topics "$OUT_DIR/l3_topics_v3.jsonl" \
-  --l1-traces "$OUT_DIR/l1_traces_v3.jsonl" \
+  --policies "$OUT_DIR/l2_policies.jsonl" \
+  --topics "$OUT_DIR/l3_topics.jsonl" \
+  --l1-traces "$OUT_DIR/l1_traces.jsonl" \
   --output "$OUT_DIR/skill_bank.jsonl" \
   --parallel "${MSCE_PARALLEL_SKILL:-3}" \
   --n-min "${MSCE_N_MIN:-2}" \
