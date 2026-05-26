@@ -35,6 +35,10 @@ try:
 except ImportError:  # pragma: no cover - allows direct script execution
     from clients import chat_completion, embedding_batch as provider_embedding_batch
 
+TAU_V = 0.5
+GAIN_N0 = 5
+GAIN_ANCHOR = 0.5
+
 
 def embed_batch(texts: list[str], batch_size: int = 16) -> np.ndarray:
     return provider_embedding_batch(texts, batch_size=batch_size)
@@ -363,16 +367,31 @@ def induce_l2_for_cluster(traces: list[dict]) -> dict | None:
 
 def compute_expected_gain(policy: dict, all_traces: list[dict],
                           all_task_summaries: dict) -> dict:
-    """V_avg_with: this cluster's V_avg.
-    V_avg_without: mean V across traces that DO have same intent_tags but DO NOT match
-                   this policy's command_kinds (proxy: "what if we hadn't applied")."""
-    v_with = policy.get("V_avg", 0.0)
+    """Estimate paper-style policy gain from with/without trace sets."""
     intent = set(policy.get("intent_tags") or [])
     src_traces = set(policy.get("source_traces") or [])
     policy_cmd_kinds = set()
     for s in policy.get("procedure", {}).get("essential_steps", []) or []:
         if isinstance(s, dict) and s.get("tool_kind"):
             policy_cmd_kinds.add(s["tool_kind"])
+
+    source_values = [
+        float(t.get("V", 0))
+        for t in all_traces
+        if t.get("trace_id") in src_traces
+    ]
+    if len(source_values) >= 3:
+        vals = np.asarray(source_values, dtype=np.float32)
+        weights = np.exp((vals - float(vals.max())) / TAU_V)
+        weights = weights / max(float(weights.sum()), 1e-8)
+        v_with = float(np.sum(weights * vals))
+        with_aggregate = "softmax_weighted"
+    elif source_values:
+        v_with = sum(source_values) / len(source_values)
+        with_aggregate = "mean"
+    else:
+        v_with = float(policy.get("V_avg", 0.0))
+        with_aggregate = "policy_v_avg_fallback"
 
     vs = []
     for t in all_traces:
@@ -384,7 +403,10 @@ def compute_expected_gain(policy: dict, all_traces: list[dict],
             kk = t.get("tool_call", {}).get("command_kind")
             if kk not in policy_cmd_kinds:
                 vs.append(float(t.get("V", 0)))
-    v_without = sum(vs) / len(vs) if vs else 0.0
+    v_without_raw = sum(vs) / len(vs) if vs else 0.0
+    v_without = (
+        len(vs) * v_without_raw + GAIN_N0 * GAIN_ANCHOR
+    ) / (len(vs) + GAIN_N0)
     n_pos = sum(1 for t in all_traces
                 if t["trace_id"] in src_traces and float(t.get("V", 0)) > 0)
     n_neg = sum(1 for t in all_traces
@@ -393,8 +415,12 @@ def compute_expected_gain(policy: dict, all_traces: list[dict],
         "n_pos": n_pos, "n_neg": n_neg,
         "v_avg_with": round(v_with, 3),
         "v_avg_without": round(v_without, 3),
+        "v_avg_without_raw": round(v_without_raw, 3),
         "gain": round(v_with - v_without, 3),
         "n_baseline_traces": len(vs),
+        "with_aggregate": with_aggregate,
+        "without_shrinkage": {"n0": GAIN_N0, "anchor": GAIN_ANCHOR},
+        "tau_v": TAU_V,
     }
 
 

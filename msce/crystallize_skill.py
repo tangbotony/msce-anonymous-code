@@ -292,6 +292,18 @@ def render_verifier_evidence(positive: list[dict], negative: list[dict],
     return "\n".join(out) or "(no evidence)"
 
 
+def reliability_record(n_support: int, v_avg: float, v_pos_count: int) -> dict:
+    eta = (v_pos_count + 1.0) / (n_support + 2.0)
+    state = "active" if n_support >= 2 and eta >= 0.6 else "probationary"
+    return {
+        "n_support": n_support,
+        "v_avg": round(v_avg, 3),
+        "v_pos_rate": round(v_pos_count / max(n_support, 1), 3),
+        "eta": round(eta, 3),
+        "lifecycle_state": state,
+    }
+
+
 def crystallize_verifier_card(policy: dict, topic: dict, positive: list[dict],
                               negative: list[dict],
                               n_min: int = 2) -> dict | None:
@@ -378,11 +390,7 @@ def crystallize_verifier_card(policy: dict, topic: dict, positive: list[dict],
     d["source_policy"] = policy.get("policy_id")
     d["source_traces"] = policy.get("source_traces", [])[:8]
     d["topic_id"] = topic.get("topic_id")
-    d["reliability"] = {
-        "n_support": n_sup,
-        "v_avg": round(v_avg, 3),
-        "v_pos_rate": round(v_pos / max(n_sup, 1), 3),
-    }
+    d["reliability"] = reliability_record(n_sup, v_avg, v_pos)
     # Applicability signature: use archetype itself as the primary intent tag,
     # so retrieval can match on archetype (after TaskProfiler also tags archetype).
     d["applicability_signature"] = {
@@ -496,11 +504,7 @@ def crystallize_one(policy: dict, topic: dict, evidence: list[dict],
     d["expected_gain"] = policy.get("expected_gain", {})
     d["source_policy"] = policy.get("policy_id")
     d["source_traces"] = policy.get("source_traces", [])[:8]
-    d["reliability"] = {
-        "n_support": n_sup,
-        "v_avg": round(v_avg, 3),
-        "v_pos_rate": round(v_pos / max(n_sup, 1), 3),
-    }
+    d["reliability"] = reliability_record(n_sup, v_avg, v_pos)
     # Ensure abstract + lexical_keywords (LLM may forget)
     if not d.get("abstract"):
         def _trig_text(x):
