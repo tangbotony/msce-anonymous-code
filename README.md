@@ -1,23 +1,5 @@
 # MSCE: Memory-Skill Co-Evolution
 
-This repository contains a minimal runnable implementation of the core
-memory-to-skill construction algorithm described in the paper *From Memory to
-Skills: Evidence-Grounded Governance for Long-Horizon LLM Agents*.
-
-It is the paper-aligned implementation, not the earlier prototype. The code
-keeps the core MSCE pipeline:
-
-- L1 grounded trace memory with reflection-weighted value backfilling
-- L2 cross-episode policy induction with expected gain
-- L3 environmental cognition abstraction
-- evidence-grounded skill crystallization with anti-patterns and boundaries
-- multi-route retrieval utilities with applicability and expected-gain gates
-- optional reasoning verifier-card mode for single-turn reasoning tasks
-
-Private artifacts were intentionally removed. This repository does not include
-training sessions, benchmark data, cached jobs, evaluation jobs, remote-machine
-scripts, model endpoints, or API keys.
-
 ## Install
 
 ```bash
