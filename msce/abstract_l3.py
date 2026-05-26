@@ -9,7 +9,7 @@ Implementation notes:
      - common_pitfalls: error_kind → remedy mapping
      - related_skills (filled later by crystallize)
      - related_topics edges (intent tag overlap)
-3. Each topic node is consumable directly by eval_with_skills_v3.
+3. Each topic node is consumable directly by the retrieval layer.
 
 Input:
     --policies l2_policies_v3.jsonl

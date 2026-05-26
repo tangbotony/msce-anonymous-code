@@ -1,7 +1,7 @@
 # MSCE: Memory-Skill Co-Evolution
 
-This folder contains the open-source implementation of the algorithm described
-in the paper *From Memory to Skills: Evidence-Grounded Governance for
+This repository contains the open-source implementation of the algorithm
+described in the paper *From Memory to Skills: Evidence-Grounded Governance for
 Long-Horizon LLM Agents*.
 
 It is the paper-aligned implementation, not the earlier prototype. The code
@@ -12,19 +12,18 @@ keeps the final MSCE pipeline:
 - L3 environmental cognition abstraction
 - evidence-grounded skill crystallization with anti-patterns and boundaries
 - multi-route retrieval with applicability and value-calibrated gates
-- optional self-evolution from failed evaluation episodes
 - optional reasoning verifier-card mode for single-turn reasoning tasks
 
 Private artifacts were intentionally removed. This repository does not include
-training sessions, benchmark data, cached jobs, remote-machine scripts, model
-endpoints, or API keys.
+training sessions, benchmark data, cached jobs, evaluation jobs, remote-machine
+scripts, model endpoints, or API keys.
 
 ## Install
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .
+python -m pip install -e .
 ```
 
 Set provider configuration through environment variables:
@@ -85,4 +84,3 @@ python -m msce.crystallize_skill \
   --output runs/msce-reasoning/skill_bank.jsonl \
   --mode verifier_card
 ```
-

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """MSCE — Multi-route skill retrieval (Topic + BM25 + Dense, fused by RRF).
 
-Pure library module; imported by eval_with_skills.py.
+Pure library module for selecting applicable skills from a generated skill bank.
 
 Usage sketch:
     from retrieval import SkillRetriever, TaskProfiler

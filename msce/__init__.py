@@ -7,6 +7,4 @@ __all__ = [
     "crystallize_skill",
     "embed_skills",
     "retrieval",
-    "eval_with_skills",
-    "self_evolve",
 ]
