@@ -4,7 +4,7 @@
 Implementation notes:
 1. Parse tool_call into structured {name, command_kind, command_text, args_raw}.
 2. Parse observation into structured {raw, exit_code, error_kind, files_created, key_signal}.
-3. Generate posthoc reflection_v2 via LLM when original sessions have sparse self-reflection.
+3. Construct a compact posthoc reflection_v2 when original sessions have sparse self-reflection.
 4. Score alpha based on reflection_v2 and local context.
 5. Estimate terminal feedback from the full verifier_result and task trace summary.
 
@@ -91,6 +91,23 @@ _FILE_CREATE_RULES = [
                re.I),
     re.compile(r"^([^\s]+\.(?:docx|xlsx|pdf|png|csv|zip))\s*$", re.M),
 ]
+
+_SENSITIVE_REDACTIONS = [
+    (re.compile(r"(?i)(authorization:\s*bearer\s+)[A-Za-z0-9._~+/=-]+"), r"\1<REDACTED_TOKEN>"),
+    (re.compile(r"(?i)\b(sk-[A-Za-z0-9_-]{12,})\b"), "<REDACTED_API_KEY>"),
+    (re.compile(r"(?i)\b(api[_-]?key|token|secret|password)\s*[:=]\s*['\"]?[^'\"\s,;]+"), r"\1=<REDACTED_SECRET>"),
+    (re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"), "<REDACTED_EMAIL>"),
+    (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b"), "<REDACTED_IP>"),
+    (re.compile(r"https?://[^\s'\"<>]+"), "<REDACTED_URL>"),
+    (re.compile(r"(?:/Users|/home|/root)/[^\s'\"<>]+"), "<REDACTED_PATH>"),
+]
+
+
+def redact_sensitive(text: str) -> str:
+    out = text or ""
+    for rx, repl in _SENSITIVE_REDACTIONS:
+        out = rx.sub(repl, out)
+    return out
 
 
 def classify_command_kind(command_text: str) -> str:
@@ -191,7 +208,7 @@ def parse_session(session_file: Path) -> list[dict]:
         elif isinstance(c, str):
             text_parts.append(c)
 
-        text = "\n".join(text_parts).strip()
+        text = redact_sensitive("\n".join(text_parts).strip())
 
         if role == "user" and pending is None:
             # initial query becomes the seed state
@@ -215,13 +232,15 @@ def parse_session(session_file: Path) -> list[dict]:
                                 command_text = v
                                 break
                 command_kind = classify_command_kind(command_text)
+                command_text = redact_sensitive(command_text or "")
+                args_raw = redact_sensitive(json.dumps(args, ensure_ascii=False))
                 pending = {
-                    "state_summary": state_summary[:1200],
+                    "state_summary": redact_sensitive(state_summary)[:1200],
                     "tool_call": {
                         "name": tc.get("name") or "exec",
                         "command_kind": command_kind,
-                        "command_text": (command_text or "")[:1500],
-                        "args_raw": json.dumps(args, ensure_ascii=False)[:1500],
+                        "command_text": command_text[:1500],
+                        "args_raw": args_raw[:1500],
                     },
                     "assistant_text": assistant_text,
                 }
@@ -232,14 +251,14 @@ def parse_session(session_file: Path) -> list[dict]:
                     pending = None
                 else:
                     steps.append({
-                        "state_summary": state_summary[:1200],
+                        "state_summary": redact_sensitive(state_summary)[:1200],
                         "tool_call": {"name": "final_answer", "command_kind": "final",
                                        "command_text": "", "args_raw": ""},
                         "observation": _obs_record(""),
                         "assistant_text_final": assistant_text,
                     })
         elif role in ("tool", "toolResult"):
-            obs_raw = text
+            obs_raw = redact_sensitive(text)
             if pending is not None:
                 steps.append({**pending, "observation": _obs_record(obs_raw)})
                 state_summary = obs_raw[-1200:]
@@ -252,34 +271,17 @@ def parse_session(session_file: Path) -> list[dict]:
 
 
 def _obs_record(raw: str) -> dict:
+    safe_raw = redact_sensitive(raw or "")
     return {
-        "raw_truncated": (raw or "")[:1500],
+        "raw_truncated": safe_raw[:1500],
         "exit_code": detect_exit_code(raw or ""),
         "error_kind": classify_error_kind(raw or ""),
-        "files_created": detect_files_created(raw or ""),
+        "files_created": [redact_sensitive(x)[:200] for x in detect_files_created(raw or "")],
         "key_signal": "",   # filled by posthoc reflection
     }
 
 
-# ── Posthoc reflection LLM ──────────────────────────────────────────
-
-POSTHOC_SYS = """你是一个 agent step 反思器。给你 1 步执行的 state/工具调用/观测，输出 JSON 反思：
-
-{
-  "what_happened": "<本步发生了什么，1 句话>",
-  "is_progress": true|false,
-  "is_blocker": true|false,
-  "error_diagnosis": "<如失败，根因；成功则空字符串>",
-  "next_action_hint": "<对下一步的具体建议；如该步成功则空>",
-  "key_signal": "<最有价值的一个观察信号，例如 'docx 已生成', 'python 命令不存在'>"
-}
-
-要求：
-- is_progress：本步在任务向前推进上的贡献（产生关键观察、生成文件、修复错误、定位 bug 等）
-- is_blocker：本步是阻塞性失败，需要换路（例如 CommandNotFound / Permission / ImportError）
-- error_diagnosis：诊断根因，不要复述错误文本
-- 只输出 JSON
-"""
+# ── Posthoc reflection summary ──────────────────────────────────────
 
 
 def posthoc_reflect(step: dict) -> dict:
@@ -294,103 +296,189 @@ def posthoc_reflect(step: dict) -> dict:
             "next_action_hint": "",
             "key_signal": "final_answer",
         }
-    state = step.get("state_summary", "")[:400]
-    cmd = tc.get("command_text", "")[:400]
     cmd_kind = tc.get("command_kind", "")
-    obs_raw = ob.get("raw_truncated", "")[:600]
     exit_code = ob.get("exit_code")
     error_kind = ob.get("error_kind")
-    files_created = ob.get("files_created")
-
-    user = (
-        f"state: {state}\n"
-        f"tool: {tc.get('name')} | command_kind: {cmd_kind}\n"
-        f"command: {cmd}\n"
-        f"exit_code: {exit_code} | error_kind: {error_kind} | files_created: {files_created}\n"
-        f"observation:\n{obs_raw}"
-    )
-    res = call_llm(POSTHOC_SYS, user, max_tokens=400, temperature=0.0)
-    if not isinstance(res, dict):
-        # parse failed
-        return {
-            "what_happened": "(unparsed)",
-            "is_progress": exit_code == 0 or files_created,
-            "is_blocker": error_kind is not None,
-            "error_diagnosis": error_kind or "",
-            "next_action_hint": "",
-            "key_signal": "",
-        }
-    # Coerce
+    files_created = ob.get("files_created") or []
+    is_progress = bool(exit_code == 0 or files_created)
+    is_blocker = bool(error_kind and not is_progress)
+    if files_created:
+        what = f"{cmd_kind} produced artifact(s): {', '.join(files_created[:3])}."
+        key_signal = "artifact_created"
+    elif exit_code == 0:
+        what = f"{cmd_kind} completed successfully."
+        key_signal = "successful_tool_call"
+    elif error_kind:
+        what = f"{cmd_kind} failed with {error_kind}."
+        key_signal = error_kind
+    else:
+        what = f"{cmd_kind} produced no explicit success or failure signal."
+        key_signal = "unclear_outcome"
     return {
-        "what_happened": str(res.get("what_happened", ""))[:300],
-        "is_progress": bool(res.get("is_progress", False)),
-        "is_blocker": bool(res.get("is_blocker", False)),
-        "error_diagnosis": str(res.get("error_diagnosis", ""))[:300],
-        "next_action_hint": str(res.get("next_action_hint", ""))[:300],
-        "key_signal": str(res.get("key_signal", ""))[:200],
+        "what_happened": what[:300],
+        "is_progress": is_progress,
+        "is_blocker": is_blocker,
+        "error_diagnosis": (error_kind or "")[:300],
+        "next_action_hint": "inspect the error signal and choose an alternate tool or dependency path" if is_blocker else "",
+        "key_signal": key_signal[:200],
     }
 
 
-# ── R_human task-level scoring ─────────────────────────────────────
+# ── Reward quantification ──────────────────────────────────────────
 
-R_HUMAN_SYS = """你是任务级评分员，给一次 agent 完整 trace 打分。
+R_HUMAN_SYS = """You are a strict grader of AI-agent task execution.
 
-输出 JSON: {"r_human": <float -1 to +1>, "intent_tags": ["..."], "artifact_tags": ["..."]}
+You receive:
+- TASK_SUMMARY the FULL conversation arc for this task:
+  * USER_ASKS_AND_AGENT_REPLIES lists every user turn paired with the agent's corresponding reply, in chronological order. One "task" frequently spans multiple user turns as the user refines / follows up / pivots topics within the same session.
+  * MOST_RECENT_USER_ASK and MOST_RECENT_AGENT_REPLY call out the final exchange explicitly; that is usually the truest signal of whether the agent is actually tracking where the user is now.
+- FEEDBACK the user's own messages AFTER the task attempt finished. May be short ("ok thanks"), explicit ("try again with X"), or structured ("resolved, but too slow"). Frequently empty.
 
-rubric:
-- 目标达成度 (-1 to +1): 任务核心需求是否被满足 (verifier passed/failed 是主信号)
-- 过程质量 (-0.5 to +0.5): 是否走弯路、是否触发关键错误后未修复
-- 用户满意信号 (-0.5 to +0.5): 终态 artifact 是否完整
+Grade the agent on THREE INDEPENDENT AXES, each in [-1, 1]:
 
-intent_tags: 3-6 个，描述任务意图（如 office-doc-gen, blockchain-dapp, data-analysis-xlsx, retail-broker, salescon, web-research, code-impl-algorithm, info-retrieval-multi-hop, sysadmin-config 等）
+1. "goal_achievement" did the agent address what the user ACTUALLY asked?
+   +1.0 every user ask across the exchange was addressed correctly.
+   +0.3 the last ask was addressed well; earlier asks had minor gaps.
+   0.0 unclear if the user's ask was met.
+   -0.3 missed a significant portion of what was asked.
+   -1.0 fundamentally wrong answer / caused damage.
 
-artifact_tags: 3-6 个，描述期望产物（如 docx, xlsx, pdf, zip, code_repo, search_answer, sql_query, advisory_doc, markdown_report 等）
+   CRITICAL RULE: do NOT anchor on the first user turn. Judge each user ask on its own merits, weighted toward the most recent exchange.
 
-只输出 JSON。"""
+2. "process_quality"
+   +1.0 clean, minimal, correct reasoning across all turns.
+   0.0 reasonable but not great.
+   -1.0 lots of thrashing, wrong tools, noisy output.
+
+3. "user_satisfaction" (from FEEDBACK text tone + trailing user asks)
+   +1.0 thanks / happy / "" / accepts and closes out.
+   +0.3 moves on neutrally to next ask or new topic.
+   0.0 no emotional signal either way.
+   -0.3 asks for correction ("no, do X instead" / "").
+   -1.0 hard-stops, expresses frustration.
+
+Rules:
+- If FEEDBACK is empty, infer satisfaction CONSERVATIVELY from the last exchange's tone. A follow-up question is usually 0 (neutral continuation), NOT negative. Never invent anger.
+- Base scores ONLY on what TASK_SUMMARY actually describes; do not assume facts not shown.
+- You are grading the HOST AGENT described in HOST_AGENT_CONTEXT, not yourself. Do NOT use your own model identity, provider, policies, or capabilities.
+- Produce one short justification.
+
+Return JSON, EXACTLY this shape (no extra keys, no commentary):
+{
+  "goal_achievement": number in [-1, 1],
+  "process_quality": number in [-1, 1],
+  "user_satisfaction": number in [-1, 1],
+  "label": "success" | "partial" | "failure" | "unknown",
+  "reason": "one-sentence justification"
+}"""
+
+
+def infer_task_tags(task_prompt: str, steps_summary: str) -> tuple[list[str], list[str]]:
+    text = f"{task_prompt}\n{steps_summary}".lower()
+    intent, artifact = set(), set()
+    rules = [
+        ("code-impl-algorithm", ("python", "pytest", "leetcode", "function", "algorithm")),
+        ("software-engineering", ("repo", "bug", "test", "patch", "github", "swe")),
+        ("info-retrieval", ("search", "find", "research", "browse", "web")),
+        ("math-reasoning", ("prove", "calculate", "probability", "equation", "geometry")),
+        ("office-doc-gen", ("docx", "xlsx", "pptx", "pdf", "spreadsheet", "document")),
+        ("knowledge-work", ("report", "memo", "analysis", "summary", "slides")),
+    ]
+    for tag, needles in rules:
+        if any(n in text for n in needles):
+            intent.add(tag)
+    artifact_rules = [
+        ("code", (".py", "code", "repo", "patch")),
+        ("docx", ("docx", "word document")),
+        ("xlsx", ("xlsx", "spreadsheet", "excel")),
+        ("pdf", ("pdf",)),
+        ("markdown-report", ("markdown", "report", "summary")),
+        ("search-answer", ("search", "answer", "research")),
+    ]
+    for tag, needles in artifact_rules:
+        if any(n in text for n in needles):
+            artifact.add(tag)
+    return sorted(intent)[:6], sorted(artifact)[:6]
 
 
 def score_r_human(task_id: str, passed: bool, verifier_details: dict,
                    task_prompt: str, last_assistant: str,
                    steps_summary: str) -> dict:
+    verifier_json = redact_sensitive(json.dumps(verifier_details, ensure_ascii=False))[:1000]
+    task_prompt = redact_sensitive(task_prompt)
+    last_assistant = redact_sensitive(last_assistant)
+    steps_summary = redact_sensitive(steps_summary)
     user = (
-        f"task_id: {task_id}\n"
-        f"verifier_passed: {passed}\n"
-        f"verifier_details: {json.dumps(verifier_details, ensure_ascii=False)[:1000]}\n"
-        f"---\n"
-        f"task_prompt: {task_prompt[:2500]}\n"
-        f"---\n"
-        f"last_assistant: {last_assistant[:1500]}\n"
-        f"---\n"
-        f"trace_summary:\n{steps_summary[:3000]}"
+        "HOST_AGENT_CONTEXT: provider-neutral LLM agent runtime.\n"
+        "TASK_SUMMARY:\n"
+        f"- task_id: {task_id}\n"
+        f"- verifier_passed: {passed}\n"
+        f"- verifier_details: {verifier_json}\n"
+        f"- USER_ASKS_AND_AGENT_REPLIES:\n{task_prompt[:2500]}\n"
+        f"- MOST_RECENT_USER_ASK:\n{task_prompt[-1200:]}\n"
+        f"- MOST_RECENT_AGENT_REPLY:\n{last_assistant[:1500]}\n"
+        f"- COMPACT_TRACE_SUMMARY:\n{steps_summary[:3000]}\n"
+        "FEEDBACK:\n"
+        f"{verifier_json}"
     )
     res = call_llm(R_HUMAN_SYS, user, max_tokens=400, temperature=0.0)
     fallback_r = 0.7 if passed else -0.5
+    intent_tags, artifact_tags = infer_task_tags(task_prompt, steps_summary)
     if not isinstance(res, dict):
-        return {"r_human": fallback_r, "intent_tags": [], "artifact_tags": []}
-    r = res.get("r_human")
-    if r is None:
+        return {"r_human": fallback_r, "intent_tags": intent_tags,
+                "artifact_tags": artifact_tags}
+    try:
+        g = float(res.get("goal_achievement", 0.0))
+        p = float(res.get("process_quality", 0.0))
+        u = float(res.get("user_satisfaction", 0.0))
+        r = 0.45 * g + 0.30 * p + 0.25 * u
+    except Exception:
         r = fallback_r
     return {
         "r_human": max(-1.0, min(1.0, float(r))),
-        "intent_tags": [str(x)[:60] for x in (res.get("intent_tags") or [])][:8],
-        "artifact_tags": [str(x)[:30] for x in (res.get("artifact_tags") or [])][:8],
+        "intent_tags": intent_tags,
+        "artifact_tags": artifact_tags,
+        "reward_axes": {
+            "goal_achievement": res.get("goal_achievement"),
+            "process_quality": res.get("process_quality"),
+            "user_satisfaction": res.get("user_satisfaction"),
+            "label": res.get("label"),
+            "reason": res.get("reason"),
+        },
     }
 
 
 # ── alpha scoring (using reflection_v2) ─────────────────────────────
 
 
-ALPHA_SYS = """你是 step-level 反思质量评分员。给你一步执行的工具/观测/posthoc reflection，输出 JSON：
+ALPHA_SYS = """You are a strict reviewer of agent self-reflections.
 
-{"alpha": <float 0 to 1>}
+You see the FULL context of one agent step:
+- STATE what the agent saw before acting (user prompt, prior observation)
+- THINKING the LLM's own native chain-of-thought for this step, if any. Empty when the model didn't emit thinking this turn.
+- ACTION what the agent produced (assistant text output)
+- TOOL_CALLS tools the agent invoked this step, with inputs and outputs (or errors). Tool usage + outcomes are part of the action chain and carry their own signal about what the agent did.
+- OUTCOME the final observable result of the step (last tool outcome or "(assistant-only step)" for pure text turns)
+- REFLECTION the text being graded: the agent's first-person explanation of WHY it acted this way and WHAT it learned.
 
-alpha:
-- 0.7~0.9: 该步识别了关键信息（定位根因/发现正确路径/生成关键 artifact）
-- 0.4~0.6: 正常推进（执行成功但只是常规步骤）
-- 0.1~0.3: 探索性或低信息步骤（grep/ls 没发现什么）
-- 0.0:    重复无效或纯噪音
+Score the REFLECTION on four axes, combined into ONE number [0, 1]:
+1. faithfulness: does the reflection match what ACTUALLY happened across THINKING + ACTION + TOOL_CALLS + OUTCOME?
+2. causal insight: does it identify why the action / tool choice worked or failed?
+3. transferability: does it surface a lesson useful on a similar future task?
+4. concreteness: are the details specific rather than generic platitudes?
 
-只输出 JSON。"""
+Rules:
+- THINKING and TOOL_CALLS are first-class evidence for grading.
+- TOOL_CALLS that errored are strong signal: the reflection should name the error and what it implied.
+- An empty / purely-tautological reflection = 0, usable = false.
+- alpha >= 0.4 AND reflection non-tautological usable = true; else false.
+
+Return JSON:
+{
+  "alpha": 0.0-1.0,
+  "usable": true | false,
+  "reason": "one-sentence justification"
+}"""
 
 
 def score_alpha(step: dict) -> float:
@@ -412,12 +500,14 @@ def score_alpha(step: dict) -> float:
         prior = 0.4
     # LLM refine
     user = (
-        f"command_kind: {step['tool_call'].get('command_kind')}\n"
-        f"exit_code: {ob.get('exit_code')} | error_kind: {error_kind}\n"
-        f"files_created: {ob.get('files_created')}\n"
-        f"key_signal: {refl.get('key_signal')}\n"
-        f"diagnosis: {refl.get('error_diagnosis')}\n"
-        f"what_happened: {refl.get('what_happened')}"
+        f"STATE: {step.get('state_summary', '')[:600]}\n"
+        "THINKING:\n"
+        "ACTION:\n"
+        f"TOOL_CALLS: {json.dumps(step.get('tool_call', {}), ensure_ascii=False)[:800]}\n"
+        f"OUTCOME: exit_code={ob.get('exit_code')} error_kind={error_kind} "
+        f"files_created={ob.get('files_created')} raw={ob.get('raw_truncated', '')[:600]}\n"
+        "REFLECTION:\n"
+        f"{json.dumps(refl, ensure_ascii=False)[:1000]}"
     )
     res = call_llm(ALPHA_SYS, user, max_tokens=40, temperature=0.0)
     if isinstance(res, dict):

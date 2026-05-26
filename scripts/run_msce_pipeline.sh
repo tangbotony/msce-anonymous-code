@@ -2,13 +2,12 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-  echo "Usage: scripts/run_msce_pipeline.sh <session_dir> <output_dir> [procedural|verifier_card]" >&2
+  echo "Usage: scripts/run_msce_pipeline.sh <session_dir> <output_dir>" >&2
   exit 2
 fi
 
 SESSION_DIR="$1"
 OUT_DIR="$2"
-MODE="${3:-procedural}"
 
 mkdir -p "$OUT_DIR"
 
@@ -41,8 +40,7 @@ python -m msce.crystallize_skill \
   --l1-traces "$OUT_DIR/l1_traces.jsonl" \
   --output "$OUT_DIR/skill_bank.jsonl" \
   --parallel "${MSCE_PARALLEL_SKILL:-3}" \
-  --n-min "${MSCE_N_MIN:-2}" \
-  --mode "$MODE"
+  --n-min "${MSCE_N_MIN:-2}"
 
 python -m msce.embed_skills \
   --skill-bank "$OUT_DIR/skill_bank.jsonl" \

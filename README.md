@@ -55,14 +55,3 @@ python -m msce.embed_skills \
   --emb-npy runs/msce-code/skill_embeddings.npy \
   --emb-ids runs/msce-code/skill_ids.json
 ```
-
-For Mathematical Reasoning, use verifier-card crystallization:
-
-```bash
-python -m msce.crystallize_skill \
-  --policies runs/msce-reasoning/l2_policies.jsonl \
-  --topics runs/msce-reasoning/l3_topics.jsonl \
-  --l1-traces runs/msce-reasoning/l1_traces.jsonl \
-  --output runs/msce-reasoning/skill_bank.jsonl \
-  --mode verifier_card
-```
